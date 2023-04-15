@@ -15,8 +15,6 @@ class OrderProcessor:
 
     def __init__(self):
         self.max_rows = 1000
-        # Initialize the rolling data store as an empty NumPy structured array
-        # dtype = [('col1', int), ('col2', float), ('col3', str)]
 
         # self.order_dtype = np.dtype({
         #     "names": [field.name for field in ORDER.__dataclass_fields__.values()],
@@ -34,12 +32,8 @@ class OrderProcessor:
 
     async def process_order(self, order):
         # Get the max and min values of a column named 'price'
-        global first_row, num_rows
         async with self.semaphore:
             pass
-            # max_price = np.max(rolling_data['price'][first_row:num_rows])
-            # Process the order here
-            # ...
 
             # Depending on which branch the order belongs to, run that processing logic.
             # build branch processing logic.
@@ -68,10 +62,12 @@ class OrderProcessor:
             # Process orders from the beginning of the rolling data store
             # I am aware accessing deque by position is not optimal but at 10 elements a cycle
             # we are still firmly under Constant Time complexity
-            tasks = [asyncio.create_task(self.process_order(self.rolling_data[j])) for j in
-                    range(0, min(10, len(self.rolling_data)))]
-            # Wait for the tasks to complete
-            await asyncio.gather(*tasks)
+            while len(self.rolling_data) > 0:
+                # Todo: The 10 below should be configurable
+                tasks = [asyncio.create_task(self.process_order(self.rolling_data[j])) for j in
+                         range(0, min(10, len(self.rolling_data)))]
+                # Wait for the tasks to complete
+                await asyncio.gather(*tasks)
 
             # At this point we know the orders were processed. Ideally we should be reading errors from the
             # gathered tasks and letting those orders be. Currently, we will drop the updates for those
