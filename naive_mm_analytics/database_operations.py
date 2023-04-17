@@ -3,33 +3,43 @@ from dataclasses import dataclass
 from typing import List
 
 import numpy as np
-from requests import Session
-from sqlalchemy import create_engine, Column, DateTime, Numeric, Text, BigInteger, JSON, or_, and_
+from sqlalchemy import Column, DateTime, Numeric, Text, BigInteger, JSON, or_, and_, select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timezone
 
 from naive_mm_analytics.common import generate_id
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 # Create declarative base
 Base = declarative_base()
 
-
-def get_session() -> Session:
-    engine = get_engine()
-    session_factory = sessionmaker(bind=engine)
-    return session_factory()
+async_session_factory = None
 
 
-def get_engine():
+async def get_async_session() -> AsyncSession:
+    global async_session_factory
+    if async_session_factory is None:
+        async_engine = get_async_engine()
+        async_session_factory = async_sessionmaker(bind=async_engine)
+    return async_session_factory()
+
+
+# def get_session() -> Session:
+#     engine = get_engine()
+#     session_factory = sessionmaker(bind=engine)
+#     return session_factory()
+
+
+def get_async_engine():
     username = os.getenv("DB_USER")
     database = os.getenv("DB_NAME")
     password = os.getenv("DB_PASSWORD")
     host = os.getenv("DB_HOST")
     port = os.getenv("DB_PORT")
 
-    engine = create_engine(
-        f"postgresql://{username}:{password}@{host}:{port}/{database}",
+    engine = create_async_engine(
+        f"postgresql+asyncpg://{username}:{password}@{host}:{port}/{database}",
         pool_size=5, max_overflow=10
     )
     return engine
@@ -84,10 +94,10 @@ class ORDER(Base):
 
 
 async def fetch_created_orders_after_timestamp(created_timestamp: datetime) -> List[ORDER]:
-    async with get_session() as session:
-        orders = await session.query(ORDER).filter(
-            and_(ORDER.created_time >= created_timestamp, ORDER.status == 'CREATED')
-        ).all()
+    async with await get_async_session() as session:
+        query = select(ORDER).where(and_(ORDER.created_time >= created_timestamp, ORDER.status == 'CREATED'))
+        result = await session.execute(query)
+        orders = result.fetchall()
         return orders
 # Create the table if it doesn't exist
 # Base.metadata.create_all(engine)
