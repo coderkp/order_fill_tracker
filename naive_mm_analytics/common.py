@@ -62,7 +62,7 @@ class SessionFactory:
             self.session = None
 
 
-class SnowtraceContractData:
+class SnowtraceTokenTransactionData:
     def __init__(self, data_dict):
         self.block_number = data_dict.get("blockNumber")
         self.timestamp = data_dict.get("timeStamp")
