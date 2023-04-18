@@ -60,3 +60,26 @@ class SessionFactory:
         if self.session is not None:
             await self.session.close()
             self.session = None
+
+
+class SnowtraceContractData:
+    def __init__(self, data_dict):
+        self.block_number = data_dict.get("blockNumber")
+        self.timestamp = data_dict.get("timeStamp")
+        self.hash = data_dict.get("hash")
+        self.nonce = data_dict.get("nonce")
+        self.block_hash = data_dict.get("blockHash")
+        self.from_address = data_dict.get("from")
+        self.to_address = data_dict.get("to")
+        self.contract_address = data_dict.get("contractAddress")
+        self.value = data_dict.get("value")
+        self.token_name = data_dict.get("tokenName")
+        self.token_symbol = data_dict.get("tokenSymbol")
+        self.token_decimal = data_dict.get("tokenDecimal")
+        self.transaction_index = data_dict.get("transactionIndex")
+        self.gas = data_dict.get("gas")
+        self.gas_price = data_dict.get("gasPrice")
+        self.gas_used = data_dict.get("gasUsed")
+        self.cumulative_gas_used = data_dict.get("cumulativeGasUsed")
+        self.input = data_dict.get("input")
+        self.confirmations = data_dict.get("confirmations")

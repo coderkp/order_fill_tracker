@@ -14,6 +14,8 @@ class TjFillProcessor:
     def __init__(self):
 
         self.wallet_address = os.getenv("TJ_WALLET_ADDRESS")
+        self.cached_fills = {}
+        self.last_seen_block = 0
 
     async def process_fill_info(self, order: ORDER):
         if order.trade_side == TradeSide.BUY:
@@ -50,6 +52,7 @@ class TjFillProcessor:
                 'txhash': order.transaction_hash,
                 'apikey': SNOWTRACE_API_KEY
             }
+
 
             query_string = urlencode(params)
             request_url = f"{SNOWTRACE_API_URL}?{query_string}"
