@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from urllib.parse import urlencode
@@ -22,41 +23,40 @@ class TjFillProcessor:
     async def process_fill_info(self, order: ORDER):
 
         txn_hash = order.transaction_hash
-        fill_info = self.fills_cache.get(txn_hash)
-        if fill_info is not None:
+        repopulate_task = None
+        buy_tj_task = None
+        if self.fills_cache.get(txn_hash) is not None:
             logger.info(f"Cache Hit for Hash: {txn_hash}.")
-
         else:
             logger.info(f"Cache Miss for Hash: {txn_hash}. Triggering re-populate")
-
+            repopulate_task = asyncio.create_task(self.populate_cache(txn_hash))
 
         if order.trade_side == TradeSide.BUY:
-            await self.process_fill_buy_tj()
-        elif order.trade_side == TradeSide.SELL:
-            await self.process_fill_sell_tj()
-        else:
-            logger.error("Invalid Trade Side")
+            buy_tj_task = asyncio.create_task(self.get_additional_buy_tj_fill_info(order))
+
+        '''
+        Context: We need to make an additional API call when the TradeSide of an Order is buy. This call may or may
+        not coincide with the cache repopulation. If it does, then both API calls would run effectively in parallel. 
+        For a sale trade_side not requiring repopulation, the below statement would effectively be 
+        asyncio.gather(None, None) and hence won't block anything.
+        '''
+        await asyncio.gather(buy_tj_task, repopulate_task)
+
+        # There absolutely must be transaction information on here at this point. If there isn't, that implies data
+        # source corruption on our Orders table or a rare situation of a Snowtrace fuck up.
+        # This rare situation still needs graceful handling.
+        fill_info: SnowtraceTokenTransactionData = self.fills_cache.get(txn_hash)
+
+        # Okay let's get the fill structured and processed below
+        # We need to extract all the fields here and then call the update_order method
 
     # Gas for buy TJ transactions might actually need to be populated by Sell TJ transactions
     # itself
-    # Okay so structure going forward. Check for the hash in the L1 Cache
-    # if hash present great
-    # if buy txn then one more api call to be made, if sale, none then.
-    # if hash not present, trigger both refill and buy api call together for buy
-    # For sale, just the refill.
-
-    # Refill based on start block number and end block number is 999999 or whatever.
-    # We store using transaction hash to support multi-accounts in the future and hence
-    # as a result don't care so much about pagination either. Just take the last block number you
-    # get in the response above and make a subsequent query if the hash is still not available.
-    # Pass the hash in concern to the refill function for it to be able to retrigger this step
-
-    # And that boys, wraps up buy and sell tj
 
     # For OKX, we need to persist the timestamp last seen.
     # We can in the same way make another query for OKX to go further on timestamp.
     # All this would honestly be resolved once we have a Redis integration
-    async def process_fill_buy_tj(self, order: ORDER):
+    async def get_additional_buy_tj_fill_info(self, order: ORDER):
         async with session_factory as session:
             params = {
                 'module': 'account',

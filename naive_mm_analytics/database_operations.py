@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
-from typing import List
+from decimal import Decimal
+from typing import List, Optional
 
 import numpy as np
 from sqlalchemy import Column, DateTime, Numeric, Text, BigInteger, JSON, or_, and_, select
@@ -99,6 +100,32 @@ async def fetch_created_orders_after_timestamp(created_timestamp: datetime) -> L
         result = await session.execute(query)
         orders = result.fetchall()
         return orders
+
+
+async def update_order_with_fill_data(order_id: int, status: str, input_amount: Decimal, input_token: str, output_amount: Decimal,
+                       output_token: str, average_fill_price: Decimal, fee_info: dict) -> Optional[ORDER]:
+    async with await get_async_session() as session:
+        # Get the order by ID
+        order = await session.get(ORDER, order_id)
+        if order:
+            # Update the order status
+            order.status = status
+            order.last_updated_time = datetime.now(timezone.utc)
+            order.input_amount = input_amount
+            order.input_token = input_token
+            order.output_amount = output_amount
+            order.output_token = output_token
+            order.average_fill_price = average_fill_price
+            order.fee_info = fee_info
+            # Commit the changes to the database
+            await session.commit()
+
+            # Return the updated order object
+            return order
+        else:
+            # Return None if the order doesn't exist
+            return None
+
 # Create the table if it doesn't exist
 # Base.metadata.create_all(engine)
 
