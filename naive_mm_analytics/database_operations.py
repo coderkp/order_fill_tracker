@@ -102,8 +102,7 @@ async def fetch_created_orders_after_timestamp(created_timestamp: datetime) -> L
         return orders
 
 
-async def update_order_with_fill_data(order_id: int, status: str, input_amount: Decimal, input_token: str, output_amount: Decimal,
-                       output_token: str, average_fill_price: Decimal, fee_info: dict) -> Optional[ORDER]:
+async def update_order_with_fill_data(order_id: int, status: str, input_amount: Decimal, input_token: str, output_amount: Optional[Decimal], output_token: str, average_fill_price: Optional[Decimal], fee_info: dict) -> Optional[ORDER]:
     async with await get_async_session() as session:
         # Get the order by ID
         order = await session.get(ORDER, order_id)

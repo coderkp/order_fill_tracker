@@ -1,11 +1,13 @@
 import asyncio
 import logging
 import os
+from decimal import Decimal
+from typing import Optional
 from urllib.parse import urlencode
 
-from naive_mm_analytics.common import TradeSide, SessionFactory, SnowtraceTokenTransactionData
+from naive_mm_analytics.common import TradeSide, SessionFactory, SnowtraceTokenTransactionData, OrderStatus
 from naive_mm_analytics.constants import SNOWTRACE_API_KEY, SNOWTRACE_API_URL, USDT_ON_AVAX_CONTRACT_ADDRESS
-from naive_mm_analytics.database_operations import ORDER
+from naive_mm_analytics.database_operations import ORDER, update_order_with_fill_data
 
 logger = logging.getLogger(__name__)
 session_factory = SessionFactory()
@@ -40,7 +42,7 @@ class TjFillProcessor:
         For a sale trade_side not requiring repopulation, the below statement would effectively be 
         asyncio.gather(None, None) and hence won't block anything.
         '''
-        await asyncio.gather(buy_tj_task, repopulate_task)
+        results = await asyncio.gather(buy_tj_task, repopulate_task)
 
         # There absolutely must be transaction information on here at this point. If there isn't, that implies data
         # source corruption on our Orders table or a rare situation of a Snowtrace fuck up.
@@ -49,14 +51,42 @@ class TjFillProcessor:
 
         # Okay let's get the fill structured and processed below
         # We need to extract all the fields here and then call the update_order method
+        order_id = order.id
+        # We are naively assuming
+        status = OrderStatus.FILLED
 
-    # Gas for buy TJ transactions might actually need to be populated by Sell TJ transactions
-    # itself
+        if order.trade_side == TradeSide.BUY:
+            input_amount = Decimal(order.size)
+            input_token = "USDT"
+            output_amount = results[0]
+
+            if output_amount is None:
+                logger.error("Failed to fetch AVAX output value")
+                average_fill_price = None
+            else:
+                average_fill_price = round(Decimal(input_amount / output_amount), 4)
+            output_token = "AVAX"
+
+        else:
+            # Same rounding formula is used while placing the order so this isn't a loss of precision
+            input_amount = round(Decimal(order.size / order.price), 4)
+            input_token = "AVAX"
+            output_amount = fill_info.value
+            output_token = "USDT"
+            average_fill_price = round(Decimal(output_amount / input_amount), 4)
+
+        fee_info = {
+            "gas": fill_info.gas,
+            "gasPrice": fill_info.gas_price,
+            "gasUsed": fill_info.gas_used,
+            "cumulativeGasUsed": fill_info.cumulative_gas_used
+        }
+        await update_order_with_fill_data(order_id=order_id, status=status.name, input_amount=input_amount, input_token=input_token, output_amount=output_amount, output_token=output_token, average_fill_price=average_fill_price, fee_info=fee_info)
 
     # For OKX, we need to persist the timestamp last seen.
     # We can in the same way make another query for OKX to go further on timestamp.
     # All this would honestly be resolved once we have a Redis integration
-    async def get_additional_buy_tj_fill_info(self, order: ORDER):
+    async def get_additional_buy_tj_fill_info(self, order: ORDER) -> Optional[Decimal]:
         async with session_factory as session:
             params = {
                 'module': 'account',
@@ -72,12 +102,18 @@ class TjFillProcessor:
                     response_data = await response.json()
                     # process the response data here
                     results = response_data["result"]
-                    logger.info(f"BUY TJ - To Address {results[-1]['to']} Value {results[-1]['value']}")
-                else:
-                    print(f"Error: {response.status}")
+                    address = results[-1]['to']
+                    value = Decimal(results[-1]['value'])
+                    output_avax_amount = round(value / 10**18, 4)
+                    logger.info(f"BUY TJ - To Address {address} Value {output_avax_amount}")
 
-    async def process_fill_sell_tj(self):
-        pass
+                    if self.wallet_address != address:
+                        logger.error("ABORT MISSION, last internal transaction to address did not match wallet address")
+                        return None
+                    return output_avax_amount
+                else:
+                    logger.error(f"Error: {response.status}")
+                    return None
 
     async def populate_cache(self, txn_hash: str):
         async with session_factory as session:
