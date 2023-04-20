@@ -24,6 +24,7 @@ class TradeSide(Enum):
         except KeyError:
             raise ValueError(f"{string_input} is not a valid trade side")
 
+
 class OrderStatus(Enum):
     CREATED = 1
     CANCELLED = 2
@@ -40,6 +41,7 @@ class Exchange(Enum):
             return cls.__members__[string_input]
         except KeyError:
             raise ValueError(f"{string_input} is not a valid exchange")
+
 
 def generate_id():
     # Ideally we shouldn't have a situation of an id collision but if we get there we can implement locking here or
@@ -83,3 +85,18 @@ class SnowtraceTokenTransactionData:
         self.cumulative_gas_used = data_dict.get("cumulativeGasUsed")
         self.input = data_dict.get("input")
         self.confirmations = data_dict.get("confirmations")
+
+
+class OkxTransactionAbstract:
+    def __init__(self, data_dict):
+        self.order_id = data_dict.get("id")
+        self.average_fill_price = data_dict.get("average")
+        info = data_dict.get("info")
+        self.fee = {
+            "fee": info.get("fee"),
+            "fee_token": info.get("feeCcy")
+        }
+        self.status = info.get("state")
+        self.cost = data_dict.get("cost")
+        self.filled_quantity = data_dict.get("filled")
+        self.fill_time = info.get("fillTime")

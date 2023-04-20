@@ -49,10 +49,10 @@ class TjFillProcessor:
         # This rare situation still needs graceful handling.
         fill_info: SnowtraceTokenTransactionData = self.fills_cache.get(txn_hash)
 
-        # Okay let's get the fill structured and processed below
         # We need to extract all the fields here and then call the update_order method
         order_id = order.id
-        # We are naively assuming
+        # We are naively assuming status to be filled here. There are cases of contract execution revert or gas too low
+        # but we need to check if those get persisted in orders db in first place
         status = OrderStatus.FILLED
 
         if order.trade_side == TradeSide.BUY:
