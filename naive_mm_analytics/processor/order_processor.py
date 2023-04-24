@@ -30,9 +30,9 @@ class OrderProcessor:
         self.semaphore = asyncio.Semaphore(5)
 
     async def process_order(self, order: ORDER):
-        # Get the max and min values of a column named 'price'
         logger.info("In process_order")
         async with self.semaphore:
+            # Todo: Remove Log
             logger.info(f"Semaphore value {self.semaphore._value}")
             exchange = Exchange.from_string(order.exchange)
 

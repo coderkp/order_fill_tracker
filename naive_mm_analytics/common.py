@@ -100,3 +100,4 @@ class OkxTransactionAbstract:
         self.cost = data_dict.get("cost")
         self.filled_quantity = data_dict.get("filled")
         self.fill_time = info.get("fillTime")
+        self.timestamp = data_dict.get("timestamp")

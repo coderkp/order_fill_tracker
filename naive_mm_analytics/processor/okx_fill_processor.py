@@ -16,7 +16,8 @@ class OkxFillProcessor:
 
     def __init__(self):
         self.fills_cache = {}
-        self.last_seen_timestamp = datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        # This has to be in epoch
+        self.last_seen_timestamp = 0
         self.exchange = ccxt.okex({
             'apiKey': os.getenv("OKX_API_KEY"),
             'secret': os.getenv("OKX_SECRET"),
@@ -27,16 +28,20 @@ class OkxFillProcessor:
         })
 
     async def process_fill_info(self, order: ORDER):
-        repopulate_task = None
 
         # Type sensitivity for id
         if self.fills_cache.get(order.id) is not None:
             logger.info(f"Cache Hit for Id: {order.id}.")
         else:
             logger.info(f"Cache Miss for Id: {order.id}. Triggering repopulate")
-            await self.populate_cache(timestamp=None)
+            await self.populate_cache(order.id)
 
         fill_info: OkxTransactionAbstract = self.fills_cache.get(order.id)
+
+        # This is to handle the situation of old data in the Orders table for which Okx might not return a response
+        if fill_info is None:
+            return
+
         average_fill_price = fill_info.average_fill_price
         fee_info = fill_info.fee
         if fill_info.status == "filled":
@@ -49,12 +54,25 @@ class OkxFillProcessor:
                                           input_token=None, output_amount=None,
                                           output_token=None, average_fill_price=average_fill_price,
                                           fee_info=fee_info)
-        # Todo: Purge from fills_cache. Check this on TJ side too
 
-    async def populate_cache(self, timestamp: Optional[int]):
-        new_orders = await self.exchange.fetch_closed_orders(symbol='AVAX/USDT', since=timestamp)
+        # Purging the processed fill from fills cache
+        # IF last seen timestamp is ever maintained in Redis, this is where it should be updated as
+        # if a server crashes, seen but unprocessed rows will again become unseen
+        del self.fills_cache[order.id]
+
+    async def populate_cache(self, order_id):
+        new_orders = await self.exchange.fetch_closed_orders(symbol='AVAX/USDT', since=self.last_seen_timestamp)
         logger.info(f"Rows Fetched: {len(new_orders)}. Cache size before update: {len(self.fills_cache)}")
 
-        self.fills_cache.update({item["id"]: OkxTransactionAbstract(item) for item in new_orders})
+        if len(new_orders) == 0:
+            logger.warning("Unable to find the transaction in OKX Order History, skipping")
+            return
 
-        # Todo: Maybe recurse till you get an empty response. Need to think of termination conditions on snowtrace too
+        for item in new_orders:
+            transaction_abstract = OkxTransactionAbstract(item)
+            self.last_seen_timestamp = max(self.last_seen_timestamp, transaction_abstract.timestamp)
+            self.fills_cache.update({item["id"]: transaction_abstract})
+
+        if self.fills_cache.get(order_id) is None:
+            await self.populate_cache(order_id)
+

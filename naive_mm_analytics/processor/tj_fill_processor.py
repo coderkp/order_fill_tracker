@@ -12,6 +12,7 @@ from naive_mm_analytics.database_operations import ORDER, update_order_with_fill
 logger = logging.getLogger(__name__)
 session_factory = SessionFactory()
 
+
 # A separate fills cache cleaner needs to be written that runs once in say 30 mins and goes through
 # the fills cache and the orders table by transaction hash. For orders mark filled, stop populating!
 class TjFillProcessor:
@@ -49,6 +50,11 @@ class TjFillProcessor:
         # This rare situation still needs graceful handling.
         fill_info: SnowtraceTokenTransactionData = self.fills_cache.get(txn_hash)
 
+        # This is to handle the edge case of infinite recursion where a transaction failed before it interacted with
+        # the smart contract and hence won't be a part of the transaction history of the smart contract.
+        if fill_info is None:
+            return
+
         # We need to extract all the fields here and then call the update_order method
         order_id = order.id
         # We are naively assuming status to be filled here. There are cases of contract execution revert or gas too low
@@ -81,11 +87,13 @@ class TjFillProcessor:
             "gasUsed": fill_info.gas_used,
             "cumulativeGasUsed": fill_info.cumulative_gas_used
         }
-        await update_order_with_fill_data(order_id=order_id, status=status.name, input_amount=input_amount, input_token=input_token, output_amount=output_amount, output_token=output_token, average_fill_price=average_fill_price, fee_info=fee_info)
+        await update_order_with_fill_data(order_id=order_id, status=status.name, input_amount=input_amount,
+                                          input_token=input_token, output_amount=output_amount,
+                                          output_token=output_token, average_fill_price=average_fill_price,
+                                          fee_info=fee_info)
+        # Purging the processed fill from fills cache
+        del self.fills_cache[txn_hash]
 
-    # For OKX, we need to persist the timestamp last seen.
-    # We can in the same way make another query for OKX to go further on timestamp.
-    # All this would honestly be resolved once we have a Redis integration
     async def get_additional_buy_tj_fill_info(self, order: ORDER) -> Optional[Decimal]:
         async with session_factory as session:
             params = {
@@ -104,7 +112,7 @@ class TjFillProcessor:
                     results = response_data["result"]
                     address = results[-1]['to']
                     value = Decimal(results[-1]['value'])
-                    output_avax_amount = round(value / 10**18, 4)
+                    output_avax_amount = round(value / 10 ** 18, 4)
                     logger.info(f"BUY TJ - To Address {address} Value {output_avax_amount}")
 
                     if self.wallet_address != address:
@@ -137,6 +145,9 @@ class TjFillProcessor:
                     results = response_data["result"]
                     if len(results) > 0:
                         self.last_seen_block = results[-1].get("blockNumber")
+                    else:
+                        logger.warning("Transaction not recorded in on-chain snowtrace data")
+                        return
                     logger.info(f"Rows Fetched: {len(results)}. Cache size before update: {len(self.fills_cache)}")
                     self.fills_cache.update({item["hash"]: SnowtraceTokenTransactionData(item) for item in results})
                     logger.info(f"Cache size after update: {len(self.fills_cache)}")
@@ -146,4 +157,3 @@ class TjFillProcessor:
         # This call basically works like pagination for us.
         if self.fills_cache.get(txn_hash) is None:
             await self.populate_cache(txn_hash)
-
