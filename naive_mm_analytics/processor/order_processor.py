@@ -70,7 +70,7 @@ class OrderProcessor:
             logger.info(f"Rolling data length {len(self.rolling_data)}")
             # Need to explicitly imply self.rolling_data returns order for clarity
             self.last_seen_timestamp = self.rolling_data[-1].ORDER.created_time
-
+            print(f"LAST seen timestamp {self.last_seen_timestamp} and tye {type(self.last_seen_timestamp)}")
             # Just chill for a bit and have a coffee.
             await asyncio.sleep(120)
 

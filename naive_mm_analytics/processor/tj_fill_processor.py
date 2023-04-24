@@ -69,7 +69,7 @@ class TjFillProcessor:
             # Same rounding formula is used while placing the order so this isn't a loss of precision
             input_amount = round(Decimal(order.size / order.price), 4)
             input_token = "AVAX"
-            output_amount = Decimal(fill_info.value)
+            output_amount = Decimal(fill_info.value)/10**6
             output_token = "USDT"
             average_fill_price = round(Decimal(output_amount / input_amount), 4)
 
