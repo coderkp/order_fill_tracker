@@ -6,6 +6,8 @@ import asyncio
 # Define the maximum number of rows in the rolling data store
 from naive_mm_analytics.common import Exchange, TradeSide
 from naive_mm_analytics.database_operations import fetch_created_orders_after_timestamp, ORDER
+from naive_mm_analytics.processor.okx_fill_processor import OkxFillProcessor
+from naive_mm_analytics.processor.tj_fill_processor import TjFillProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,8 @@ class OrderProcessor:
         self.last_seen_timestamp = datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         # Create a semaphore with a maximum of 5 permits
         self.semaphore = asyncio.Semaphore(5)
+        self.okx_fill_processor = OkxFillProcessor()
+        self.tj_fill_processor = TjFillProcessor()
 
     async def process_order(self, order: ORDER):
         logger.info("In process_order")
@@ -38,23 +42,12 @@ class OrderProcessor:
 
             if exchange == Exchange.OKX:
                 logger.info("OKX Identified")
-                # Call OKX Processor below
+                await self.okx_fill_processor.process_fill_info(order)
             elif exchange == Exchange.TRADER_JOE:
                 logger.info("TraderJoe Identified")
-                trade_side = TradeSide.from_string(order.trade_side)
-
-                if trade_side == TradeSide.BUY:
-                    logger.info("This is a buy TJ order")
-                    # Call Buy TJ Processor Here
-                elif trade_side == TradeSide.SELL:
-                    logger.info("This is a Sell TJ order")
-                    # Call Sell TJ Processor Here
-                else:
-                    logger.warning("Unknown Trade Side")
-
+                await self.tj_fill_processor.process_fill_info(order)
             else:
                 logger.warning("Unknown Exchange")
-            await asyncio.sleep(1)
             logger.info(f"Finally the order {order}")
 
     async def fetch_orders_from_db(self):
@@ -86,7 +79,7 @@ class OrderProcessor:
         while True:
             # To avoid blocking this method going crazy when there are no orders to process
             if len(self.rolling_data) == 0:
-                await asyncio.sleep(60)
+                await asyncio.sleep(10)
 
             # Process orders from the beginning of the rolling data store
             # I am aware accessing deque by position is not optimal but at 10 elements a cycle

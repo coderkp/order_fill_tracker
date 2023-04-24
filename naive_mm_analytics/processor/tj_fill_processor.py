@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from asyncio import Lock
 from decimal import Decimal
 from typing import Optional
 from urllib.parse import urlencode
@@ -22,28 +23,19 @@ class TjFillProcessor:
         self.wallet_address = os.getenv("TJ_WALLET_ADDRESS")
         self.fills_cache = {}
         self.last_seen_block = 0
+        self.cache_lock = Lock()
 
     async def process_fill_info(self, order: ORDER):
 
         txn_hash = order.transaction_hash
-        repopulate_task = None
-        buy_tj_task = None
-        if self.fills_cache.get(txn_hash) is not None:
-            logger.info(f"Cache Hit for Hash: {txn_hash}.")
-        else:
-            logger.info(f"Cache Miss for Hash: {txn_hash}. Triggering re-populate")
-            repopulate_task = asyncio.create_task(self.populate_cache(txn_hash))
 
-        if order.trade_side == TradeSide.BUY:
-            buy_tj_task = asyncio.create_task(self.get_additional_buy_tj_fill_info(order))
+        async with self.cache_lock:
+            if self.fills_cache.get(txn_hash) is not None:
+                logger.info(f"Cache Hit for Hash: {txn_hash}.")
+            else:
+                logger.info(f"Cache Miss for Hash: {txn_hash}. Triggering re-populate")
+                await self.populate_cache(txn_hash)
 
-        '''
-        Context: We need to make an additional API call when the TradeSide of an Order is buy. This call may or may
-        not coincide with the cache repopulation. If it does, then both API calls would run effectively in parallel. 
-        For a sale trade_side not requiring repopulation, the below statement would effectively be 
-        asyncio.gather(None, None) and hence won't block anything.
-        '''
-        results = await asyncio.gather(buy_tj_task, repopulate_task)
 
         # There absolutely must be transaction information on here at this point. If there isn't, that implies data
         # source corruption on our Orders table or a rare situation of a Snowtrace fuck up.
@@ -64,7 +56,7 @@ class TjFillProcessor:
         if order.trade_side == TradeSide.BUY:
             input_amount = Decimal(order.size)
             input_token = "USDT"
-            output_amount = results[0]
+            output_amount = await self.get_additional_buy_tj_fill_info(order)
 
             if output_amount is None:
                 logger.error("Failed to fetch AVAX output value")
@@ -77,7 +69,7 @@ class TjFillProcessor:
             # Same rounding formula is used while placing the order so this isn't a loss of precision
             input_amount = round(Decimal(order.size / order.price), 4)
             input_token = "AVAX"
-            output_amount = fill_info.value
+            output_amount = Decimal(fill_info.value)
             output_token = "USDT"
             average_fill_price = round(Decimal(output_amount / input_amount), 4)
 

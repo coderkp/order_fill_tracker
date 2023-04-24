@@ -1,9 +1,8 @@
 import logging
 import os
-from typing import Optional
+from asyncio import Lock
 
 import ccxt.async_support as ccxt
-from datetime import datetime, timezone
 
 from naive_mm_analytics.common import SessionFactory, OkxTransactionAbstract, OrderStatus
 from naive_mm_analytics.database_operations import ORDER, update_order_with_fill_data
@@ -26,15 +25,16 @@ class OkxFillProcessor:
                 'defaultType': 'spot',  # or 'futures' for futures trading
             }
         })
+        self.cache_lock = Lock()
 
     async def process_fill_info(self, order: ORDER):
 
-        # Type sensitivity for id
-        if self.fills_cache.get(order.id) is not None:
-            logger.info(f"Cache Hit for Id: {order.id}.")
-        else:
-            logger.info(f"Cache Miss for Id: {order.id}. Triggering repopulate")
-            await self.populate_cache(order.id)
+        async with self.cache_lock:
+            if self.fills_cache.get(order.id) is not None:
+                logger.info(f"Cache Hit for Id: {order.id}.")
+            else:
+                logger.info(f"Cache Miss for Id: {order.id}. Triggering repopulate")
+                await self.populate_cache(order.id)
 
         fill_info: OkxTransactionAbstract = self.fills_cache.get(order.id)
 
