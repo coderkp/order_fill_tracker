@@ -1,3 +1,4 @@
+import logging
 import os
 from dataclasses import dataclass
 from decimal import Decimal
@@ -16,7 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 Base = declarative_base()
 
 async_session_factory = None
-
+logger = logging.getLogger(__name__)
 
 async def get_async_session() -> AsyncSession:
     global async_session_factory
@@ -59,9 +60,9 @@ class ORDER(Base):
     type = Column(Text, nullable=False)
     trade_side = Column(Text, nullable=False)
     status = Column(Text, nullable=False)
-    exchange_order_id = Column(Text, nullable=False)
+    exchange_order_id: str = Column(Text, nullable=False)
     transaction_hash = Column(Text, nullable=True)
-    created_time = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
+    created_time: datetime = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
     last_updated_time = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
     input_amount = Column(Numeric, nullable=True)
     input_token = Column(Text, nullable=True)
@@ -96,16 +97,28 @@ class ORDER(Base):
 
 async def fetch_created_orders_after_timestamp(created_timestamp: datetime) -> List[ORDER]:
     async with await get_async_session() as session:
-        query = select(ORDER).where(and_(ORDER.created_time >= created_timestamp, ORDER.status == 'CREATED'))
+        query = select(ORDER).where(
+            and_(
+                ORDER.created_time > created_timestamp,
+                ORDER.status == 'CREATED',
+                ORDER.size > 1020
+            )
+        ).order_by(ORDER.created_time)
+
         result = await session.execute(query)
         orders = result.fetchall()
         return orders
 
 
-async def update_order_with_fill_data(order_id: int, status: str, input_amount: Decimal, input_token: str, output_amount: Optional[Decimal], output_token: str, average_fill_price: Optional[Decimal], fee_info: dict) -> Optional[ORDER]:
+async def update_order_with_fill_data(order_id: int, status: str, input_amount: Optional[Decimal], input_token: Optional[str], output_amount: Optional[Decimal], output_token: Optional[str], average_fill_price: Optional[Decimal], fee_info: dict) -> Optional[str]:
+    logger.info(f"In the update order with fill data method")
     async with await get_async_session() as session:
         # Get the order by ID
+        logger.info("Waiting now to get order")
         order = await session.get(ORDER, order_id)
+        logger.info("Got the order")
+        exch_order_id = ""
+
         if order:
             # Update the order status
             order.status = status
@@ -117,12 +130,13 @@ async def update_order_with_fill_data(order_id: int, status: str, input_amount: 
             order.average_fill_price = average_fill_price
             order.fee_info = fee_info
             # Commit the changes to the database
+            exch_order_id = order.exchange_order_id
             await session.commit()
-
-            # Return the updated order object
-            return order
+            logger.info(f"Fill info updated for f{exch_order_id}")
+            return "DONE"
         else:
             # Return None if the order doesn't exist
+            logger.info(f"Why the fuck does this order {order_id} not exist")
             return None
 
 # Create the table if it doesn't exist

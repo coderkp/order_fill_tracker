@@ -23,19 +23,20 @@ class TjFillProcessor:
         self.wallet_address = os.getenv("TJ_WALLET_ADDRESS")
         self.fills_cache = {}
         self.last_seen_block = 0
-        self.cache_lock = Lock()
+        self.populate_cache_task = None
 
     async def process_fill_info(self, order: ORDER):
 
         txn_hash = order.transaction_hash
 
-        async with self.cache_lock:
-            if self.fills_cache.get(txn_hash) is not None:
-                logger.info(f"Cache Hit for Hash: {txn_hash}.")
-            else:
-                logger.info(f"Cache Miss for Hash: {txn_hash}. Triggering re-populate")
-                await self.populate_cache(txn_hash)
-
+        if self.fills_cache.get(txn_hash) is not None:
+            logger.info(f"Cache Hit for Hash: {txn_hash}.")
+        else:
+            logger.info(f"Cache Miss for Hash: {txn_hash}. Triggering re-populate")
+            if self.populate_cache_task is None or self.populate_cache_task.done():
+                # create a new populate_cache task
+                self.populate_cache_task = asyncio.create_task(self.populate_cache(txn_hash))
+            await self.populate_cache_task
 
         # There absolutely must be transaction information on here at this point. If there isn't, that implies data
         # source corruption on our Orders table or a rare situation of a Snowtrace fuck up.
@@ -45,6 +46,7 @@ class TjFillProcessor:
         # This is to handle the edge case of infinite recursion where a transaction failed before it interacted with
         # the smart contract and hence won't be a part of the transaction history of the smart contract.
         if fill_info is None:
+            logger.info(f"Fill info is none for hash {txn_hash}")
             return
 
         # We need to extract all the fields here and then call the update_order method
@@ -53,10 +55,13 @@ class TjFillProcessor:
         # but we need to check if those get persisted in orders db in first place
         status = OrderStatus.FILLED
 
-        if order.trade_side == TradeSide.BUY:
+        if order.trade_side == TradeSide.BUY.name:
+            logger.info("This is a TJ Buy")
+            #return
             input_amount = Decimal(order.size)
             input_token = "USDT"
-            output_amount = await self.get_additional_buy_tj_fill_info(order)
+            addnl_info_task = asyncio.create_task(self.get_additional_buy_tj_fill_info(order))
+            output_amount = await addnl_info_task
 
             if output_amount is None:
                 logger.error("Failed to fetch AVAX output value")
@@ -79,12 +84,13 @@ class TjFillProcessor:
             "gasUsed": fill_info.gas_used,
             "cumulativeGasUsed": fill_info.cumulative_gas_used
         }
-        await update_order_with_fill_data(order_id=order_id, status=status.name, input_amount=input_amount,
+        result = await update_order_with_fill_data(order_id=order_id, status=status.name, input_amount=input_amount,
                                           input_token=input_token, output_amount=output_amount,
                                           output_token=output_token, average_fill_price=average_fill_price,
                                           fee_info=fee_info)
+        logger.info(f"The update order result {result}")
         # Purging the processed fill from fills cache
-        del self.fills_cache[txn_hash]
+        # del self.fills_cache[txn_hash]
 
     async def get_additional_buy_tj_fill_info(self, order: ORDER) -> Optional[Decimal]:
         async with session_factory as session:
@@ -135,12 +141,16 @@ class TjFillProcessor:
                     response_data = await response.json()
                     # process the response data here
                     results = response_data["result"]
-                    if len(results) > 0:
+
+                    # if len(results) > 0 and self.last_seen_block == results[-1].get("blockNumber"):
+                    #     logger.info("No New Orders on Trader Joe")
+                    #     return
+                    if len(results) > 1:
                         self.last_seen_block = results[-1].get("blockNumber")
                     else:
-                        logger.warning("Transaction not recorded in on-chain snowtrace data")
+                        logger.info("No New Orders on Trader Joe")
                         return
-                    logger.info(f"Rows Fetched: {len(results)}. Cache size before update: {len(self.fills_cache)}")
+                    logger.info(f"TJ Rows Fetched: {len(results)}. Cache size before update: {len(self.fills_cache)}")
                     self.fills_cache.update({item["hash"]: SnowtraceTokenTransactionData(item) for item in results})
                     logger.info(f"Cache size after update: {len(self.fills_cache)}")
                 else:

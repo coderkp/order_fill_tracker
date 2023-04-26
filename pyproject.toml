@@ -15,6 +15,7 @@ psycopg2-binary = "^2.9.6"
 async-sqlalchemy = "^1.0.0"
 aiohttp = "^3.8.4"
 ccxt = "^3.0.72"
+greenlet = "^2.0.2"
 
 [tool.poetry.dev-dependencies]
 

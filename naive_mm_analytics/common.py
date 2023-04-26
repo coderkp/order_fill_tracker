@@ -1,4 +1,5 @@
 import time
+from decimal import Decimal
 from enum import Enum
 
 import aiohttp as aiohttp
@@ -50,16 +51,20 @@ def generate_id():
 
 
 class SessionFactory:
+    # Todo Add semaphore logic or likewise to track active usage of sessions.
     def __init__(self):
         self.session = None
+        self.active_count = 0
 
     async def __aenter__(self):
         if self.session is None:
             self.session = aiohttp.ClientSession()
+        self.active_count += 1
         return self.session
 
     async def __aexit__(self, exc_type, exc, tb):
-        if self.session is not None:
+        self.active_count -= 1
+        if self.active_count == 0 and self.session is not None:
             await self.session.close()
             self.session = None
 
@@ -90,7 +95,7 @@ class SnowtraceTokenTransactionData:
 class OkxTransactionAbstract:
     def __init__(self, data_dict):
         self.order_id = data_dict.get("id")
-        self.average_fill_price = data_dict.get("average")
+        self.average_fill_price = Decimal(data_dict.get("average"))
         info = data_dict.get("info")
         self.fee = {
             "fee": info.get("fee"),
