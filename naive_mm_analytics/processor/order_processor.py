@@ -22,9 +22,9 @@ class OrderProcessor:
         self.rolling_data = deque(maxlen=self.max_rows)
 
         # This is a default timestamp of Jan 1st 2023, long before we started developing this system
-        self.last_seen_timestamp = datetime(2023, 4, 25, 0, 0, 0, tzinfo=timezone.utc)
+        self.last_seen_timestamp = datetime(2023, 4, 23, 0, 0, 0, tzinfo=timezone.utc)
         # Create a semaphore with a maximum of 5 permits
-        self.semaphore = asyncio.Semaphore(2)
+        self.semaphore = asyncio.Semaphore(3)
         self.okx_fill_processor = OkxFillProcessor()
         self.tj_fill_processor = TjFillProcessor()
 
@@ -78,12 +78,15 @@ class OrderProcessor:
             # Process orders from the beginning of the rolling data store
             # I am aware accessing deque by position is not optimal but at 10 elements a cycle
             # we are still firmly under Constant Time complexity
-            # Todo: The 10 below should be configurable
-            tasks_len = min(10, len(self.rolling_data))
+            # Todo: There is a nice little BUG HERE
+            tasks_len = min(500, len(self.rolling_data))
             tasks = [asyncio.create_task(self.process_order(self.rolling_data[j].ORDER)) for j in
                      range(0, tasks_len)]
             # Wait for the tasks to complete
-            await asyncio.gather(*[tasks[i] for i in range(tasks_len)])
+            try:
+                await asyncio.gather(*[tasks[i] for i in range(tasks_len)])
+            except Exception as e:
+                logger.error(f"Error occured in order processing: {e}")
 
             # For this naive model of insertion and deletion to work, there absolutely CANNOT be inserts at the
             # front of the queue. The insert and process parts work in different coroutines and hence the app code
@@ -94,6 +97,7 @@ class OrderProcessor:
                 logger.info(f"Order {popped_order.id} has been processed")
             # At this point we know the orders were processed. Ideally we should be reading errors from the
             # gathered tasks and letting those orders be. Currently, we will drop the updates for those
+            await asyncio.sleep(3)
 
     async def start(self):
         db_fetch_task = asyncio.create_task(self.fetch_orders_from_db())

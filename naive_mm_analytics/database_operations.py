@@ -42,7 +42,7 @@ def get_async_engine():
 
     engine = create_async_engine(
         f"postgresql+asyncpg://{username}:{password}@{host}:{port}/{database}",
-        pool_size=5, max_overflow=10
+        pool_size=20, max_overflow=30
     )
     return engine
 
