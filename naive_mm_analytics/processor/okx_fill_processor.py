@@ -43,6 +43,8 @@ class OkxFillProcessor:
             if self.populate_cache_task is None or self.populate_cache_task.done():
                 # create a new populate_cache task
                 self.populate_cache_task = asyncio.create_task(self.populate_cache(order.exchange_order_id))
+            else:
+                logger.info("Awaiting an ongoing cache population")
             await self.populate_cache_task
 
 

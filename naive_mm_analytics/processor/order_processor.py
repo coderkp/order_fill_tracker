@@ -22,7 +22,7 @@ class OrderProcessor:
         self.rolling_data = deque(maxlen=self.max_rows)
 
         # This is a default timestamp of Jan 1st 2023, long before we started developing this system
-        self.last_seen_timestamp = datetime(2023, 4, 23, 0, 0, 0, tzinfo=timezone.utc)
+        self.last_seen_timestamp = datetime(2023, 4, 25, 0, 0, 0, tzinfo=timezone.utc)
         # Create a semaphore with a maximum of 5 permits
         self.semaphore = asyncio.Semaphore(3)
         self.okx_fill_processor = OkxFillProcessor()
@@ -67,7 +67,9 @@ class OrderProcessor:
             print(self.last_seen_timestamp)
             await asyncio.sleep(90)
 
-
+    # 2 broad cases
+    # Cache Hit - You have all the fill information already
+    # API Call - Takes a while.
     async def process_orders(self):
         logger.info("In process_ordersss")
         while True:
@@ -79,7 +81,7 @@ class OrderProcessor:
             # I am aware accessing deque by position is not optimal but at 10 elements a cycle
             # we are still firmly under Constant Time complexity
             # Todo: There is a nice little BUG HERE
-            tasks_len = min(500, len(self.rolling_data))
+            tasks_len = min(150, len(self.rolling_data))
             tasks = [asyncio.create_task(self.process_order(self.rolling_data[j].ORDER)) for j in
                      range(0, tasks_len)]
             # Wait for the tasks to complete
