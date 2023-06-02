@@ -14,6 +14,8 @@ from naive_mm_analytics.common import generate_id
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 # Create declarative base
+from naive_mm_analytics.model.ArbPerformance import ArbPerformance
+
 Base = declarative_base()
 
 async_session_factory = None
@@ -138,6 +140,41 @@ async def update_order_with_fill_data(order_id: int, status: str, input_amount: 
             # Return None if the order doesn't exist
             logger.info(f"Why the fuck does this order {order_id} not exist")
             return None
+
+async def calculate_arb_performance():
+    async with await get_async_session() as session:
+        # Fetch orders grouped by stitch_id
+        query = select(ORDER).where(ORDER.stitch_id.isnot(None)).order_by(ORDER.stitch_id)
+        result = await session.execute(query)
+        rows = result.fetchall()
+
+        # Calculate profit per stitch_id
+        stitch_id_to_profit = {}
+        for row in rows:
+            order = row[0]
+            print(order)
+            if order.stitch_id not in stitch_id_to_profit:
+                stitch_id_to_profit[order.stitch_id] = {'pair': order.pair, 'size': order.size, 'buy_price': None, 'sell_price': None}
+
+            # Exclude if average_fill_price is None
+            if order.average_fill_price is None:
+                print(f"Omitting stitch_id {order.stitch_id} as average_fill_price is None")
+                continue
+
+            if order.trade_side == "SELL":
+                stitch_id_to_profit[order.stitch_id]['sell_price'] = order.average_fill_price
+            elif order.trade_side == "BUY":
+                stitch_id_to_profit[order.stitch_id]['buy_price'] = order.average_fill_price
+
+        # Insert into ARBPerformance table
+        for stitch_id, info in stitch_id_to_profit.items():
+            # Only process if both buy_price and sell_price are not None
+            if info['buy_price'] is not None and info['sell_price'] is not None:
+                profit = info['size'] * (info['sell_price'] - info['buy_price'])
+                arb_performance = ArbPerformance(stitch_id=stitch_id, pair=info['pair'], profit=profit)
+                session.add(arb_performance)
+
+        await session.commit()
 
 # Create the table if it doesn't exist
 # Base.metadata.create_all(engine)

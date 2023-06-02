@@ -24,7 +24,7 @@ class OrderProcessor:
         # This is a default timestamp of Jan 1st 2023, long before we started developing this system
         self.last_seen_timestamp = datetime(2023, 4, 25, 0, 0, 0, tzinfo=timezone.utc)
         # Create a semaphore with a maximum of 5 permits
-        self.semaphore = asyncio.Semaphore(3)
+        self.semaphore = asyncio.Semaphore(2)
         self.okx_fill_processor = OkxFillProcessor()
         self.tj_fill_processor = TjFillProcessor()
 
